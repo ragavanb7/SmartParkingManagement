@@ -1,0 +1,483 @@
+# Smart Parking Management System
+# Development Program
+
+from datetime import datetime
+
+
+# =========================================================
+# PARKING SLOTS
+# =========================================================
+
+PARKING_SLOTS = {
+    "B1": {"type": "Bike", "occupied": False},
+    "B2": {"type": "Bike", "occupied": False},
+
+    "C1": {"type": "Car", "occupied": False},
+    "C2": {"type": "Car", "occupied": False},
+    "C3": {"type": "Car", "occupied": False},
+
+    "S1": {"type": "SUV", "occupied": False},
+    "S2": {"type": "SUV", "occupied": False},
+
+    "T1": {"type": "Truck", "occupied": False},
+
+    "E1": {"type": "Electric Vehicle", "occupied": False},
+    "E2": {"type": "Electric Vehicle", "occupied": False}
+}
+
+
+# =========================================================
+# PARKING RATE PER HOUR
+# =========================================================
+
+BASE_RATES = {
+    "Bike": 20,
+    "Car": 50,
+    "SUV": 70,
+    "Truck": 100,
+    "Electric Vehicle": 60
+}
+
+
+# =========================================================
+# PARKING RECORDS
+# =========================================================
+
+PARKING_RECORDS = {}
+
+
+# =========================================================
+# VEHICLE DATABASE
+# =========================================================
+
+VEHICLES = {}
+
+
+# =========================================================
+# PEAK HOURS
+# =========================================================
+
+PEAK_START = 17
+PEAK_END = 21
+
+
+# =========================================================
+# SLOT ALLOCATION
+# =========================================================
+
+def find_slot(vehicle_type, vip=False):
+
+    # VIP vehicles get priority slots
+    if vip:
+
+        for slot_id, slot in PARKING_SLOTS.items():
+
+            if (
+                not slot["occupied"]
+                and slot["type"] == vehicle_type
+            ):
+
+                return slot_id
+
+    # Normal automatic slot allocation
+    for slot_id, slot in PARKING_SLOTS.items():
+
+        if (
+            not slot["occupied"]
+            and slot["type"] == vehicle_type
+        ):
+
+            return slot_id
+
+    return None
+
+
+# =========================================================
+# VEHICLE ENTRY
+# =========================================================
+
+def vehicle_entry(
+    ticket_id,
+    vehicle_number,
+    vehicle_type,
+    entry_time,
+    vip=False
+):
+
+    # -----------------------------------------------------
+    # Validate vehicle type
+    # -----------------------------------------------------
+
+    valid_types = [
+        "Bike",
+        "Car",
+        "SUV",
+        "Truck",
+        "Electric Vehicle"
+    ]
+
+    if vehicle_type not in valid_types:
+
+        return {
+            "status": "FAILED",
+            "message": "Invalid vehicle type"
+        }
+
+
+    # -----------------------------------------------------
+    # Duplicate vehicle check
+    # -----------------------------------------------------
+
+    if vehicle_number in VEHICLES:
+
+        return {
+            "status": "FAILED",
+            "message": "Vehicle already parked"
+        }
+
+
+    # -----------------------------------------------------
+    # Duplicate ticket check
+    # -----------------------------------------------------
+
+    if ticket_id in PARKING_RECORDS:
+
+        return {
+            "status": "FAILED",
+            "message": "Ticket already exists"
+        }
+
+
+    # -----------------------------------------------------
+    # Automatic slot allocation
+    # -----------------------------------------------------
+
+    slot_id = find_slot(
+        vehicle_type,
+        vip
+    )
+
+    if slot_id is None:
+
+        return {
+            "status": "FAILED",
+            "message": "No suitable parking slot available"
+        }
+
+
+    # -----------------------------------------------------
+    # Store parking information
+    # -----------------------------------------------------
+
+    PARKING_SLOTS[slot_id]["occupied"] = True
+
+    PARKING_RECORDS[ticket_id] = {
+        "vehicle_number": vehicle_number,
+        "vehicle_type": vehicle_type,
+        "slot_id": slot_id,
+        "entry_time": entry_time,
+        "vip": vip,
+        "status": "PARKED"
+    }
+
+    VEHICLES[vehicle_number] = ticket_id
+
+
+    return {
+        "status": "SUCCESS",
+        "ticket_id": ticket_id,
+        "vehicle_number": vehicle_number,
+        "slot_id": slot_id,
+        "message": "Vehicle parked successfully"
+    }
+
+
+# =========================================================
+# PARKING FEE CALCULATION
+# =========================================================
+
+def calculate_fee(
+    vehicle_type,
+    entry_time,
+    exit_time,
+    vip=False,
+    lost_ticket=False,
+    ev_charging=False
+):
+
+    try:
+
+        entry = datetime.strptime(
+            entry_time,
+            "%Y-%m-%d %H:%M"
+        )
+
+        exit = datetime.strptime(
+            exit_time,
+            "%Y-%m-%d %H:%M"
+        )
+
+    except ValueError:
+
+        return None
+
+
+    # -----------------------------------------------------
+    # Invalid exit time
+    # -----------------------------------------------------
+
+    if exit < entry:
+
+        return None
+
+
+    # -----------------------------------------------------
+    # Calculate duration
+    # -----------------------------------------------------
+
+    duration_seconds = (
+        exit - entry
+    ).total_seconds()
+
+    duration_hours = duration_seconds / 3600
+
+    # Minimum one hour charge
+    hours = max(
+        1,
+        int(duration_hours)
+        if duration_hours.is_integer()
+        else int(duration_hours) + 1
+    )
+
+
+    # -----------------------------------------------------
+    # Base parking fee
+    # -----------------------------------------------------
+
+    base_fee = (
+        BASE_RATES[vehicle_type]
+        * hours
+    )
+
+
+    # -----------------------------------------------------
+    # Peak hour pricing
+    # -----------------------------------------------------
+
+    peak_charge = 0
+
+    current_hour = entry.hour
+
+    while current_hour < exit.hour:
+
+        if (
+            current_hour >= PEAK_START
+            and current_hour < PEAK_END
+        ):
+
+            peak_charge += (
+                BASE_RATES[vehicle_type]
+                * 0.50
+            )
+
+        current_hour += 1
+
+
+    # -----------------------------------------------------
+    # VIP discount
+    # -----------------------------------------------------
+
+    vip_discount = 0
+
+    if vip:
+
+        vip_discount = base_fee * 0.20
+
+
+    # -----------------------------------------------------
+    # Lost ticket charge
+    # -----------------------------------------------------
+
+    lost_ticket_charge = 0
+
+    if lost_ticket:
+
+        lost_ticket_charge = 200
+
+
+    # -----------------------------------------------------
+    # EV charging fee
+    # -----------------------------------------------------
+
+    charging_fee = 0
+
+    if (
+        vehicle_type == "Electric Vehicle"
+        and ev_charging
+    ):
+
+        charging_fee = 100
+
+
+    # -----------------------------------------------------
+    # Final fee
+    # -----------------------------------------------------
+
+    total_fee = (
+        base_fee
+        + peak_charge
+        + lost_ticket_charge
+        + charging_fee
+        - vip_discount
+    )
+
+
+    return {
+        "base_fee": round(base_fee, 2),
+        "peak_charge": round(peak_charge, 2),
+        "vip_discount": round(vip_discount, 2),
+        "lost_ticket_charge": round(lost_ticket_charge, 2),
+        "ev_charging_fee": round(charging_fee, 2),
+        "total_fee": round(total_fee, 2),
+        "hours": hours
+    }
+
+
+# =========================================================
+# VEHICLE EXIT
+# =========================================================
+
+def vehicle_exit(
+    ticket_id,
+    exit_time,
+    lost_ticket=False,
+    ev_charging=False
+):
+
+    # -----------------------------------------------------
+    # Check ticket
+    # -----------------------------------------------------
+
+    if ticket_id not in PARKING_RECORDS:
+
+        return {
+            "status": "FAILED",
+            "message": "Invalid ticket"
+        }
+
+
+    record = PARKING_RECORDS[ticket_id]
+
+
+    # -----------------------------------------------------
+    # Check already exited
+    # -----------------------------------------------------
+
+    if record["status"] == "EXITED":
+
+        return {
+            "status": "FAILED",
+            "message": "Vehicle already exited"
+        }
+
+
+    # -----------------------------------------------------
+    # Calculate fee
+    # -----------------------------------------------------
+
+    fee_details = calculate_fee(
+        record["vehicle_type"],
+        record["entry_time"],
+        exit_time,
+        record["vip"],
+        lost_ticket,
+        ev_charging
+    )
+
+
+    if fee_details is None:
+
+        return {
+            "status": "FAILED",
+            "message": "Invalid exit time"
+        }
+
+
+    # -----------------------------------------------------
+    # Release parking slot
+    # -----------------------------------------------------
+
+    slot_id = record["slot_id"]
+
+    PARKING_SLOTS[slot_id]["occupied"] = False
+
+
+    # -----------------------------------------------------
+    # Remove vehicle from active vehicles
+    # -----------------------------------------------------
+
+    vehicle_number = record["vehicle_number"]
+
+    if vehicle_number in VEHICLES:
+
+        del VEHICLES[vehicle_number]
+
+
+    # -----------------------------------------------------
+    # Update record
+    # -----------------------------------------------------
+
+    record["status"] = "EXITED"
+
+    record["exit_time"] = exit_time
+
+    record["fee"] = fee_details["total_fee"]
+
+
+    return {
+        "status": "SUCCESS",
+        "ticket_id": ticket_id,
+        "slot_id": slot_id,
+        "hours": fee_details["hours"],
+        "base_fee": fee_details["base_fee"],
+        "peak_charge": fee_details["peak_charge"],
+        "vip_discount": fee_details["vip_discount"],
+        "lost_ticket_charge":
+            fee_details["lost_ticket_charge"],
+        "ev_charging_fee":
+            fee_details["ev_charging_fee"],
+        "total_fee": fee_details["total_fee"]
+    }
+
+
+# =========================================================
+# SAMPLE EXECUTION
+# =========================================================
+
+if __name__ == "__main__":
+
+    print("==============================================")
+    print("SMART PARKING MANAGEMENT SYSTEM")
+    print("==============================================")
+
+
+    print("\nVEHICLE ENTRY")
+
+    entry = vehicle_entry(
+        "T001",
+        "TN01AB1234",
+        "Car",
+        "2026-08-20 10:00"
+    )
+
+    print(entry)
+
+
+    print("\nVEHICLE EXIT")
+
+    exit_result = vehicle_exit(
+        "T001",
+        "2026-08-20 12:00"
+    )
+
+    print(exit_result)
